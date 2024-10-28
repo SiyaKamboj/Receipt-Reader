@@ -6,35 +6,14 @@ import requests
 import base64
 from flask_sqlalchemy import SQLAlchemy
 import os
-from werkzeug.security import generate_password_hash, check_password_hash
+from models import Receipt, ReceiptItem, User, db
 
 app = Flask(__name__)
-CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///receipts.db'  # Using SQLite for simplicity
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-
-#creates a table called receipt and stores each receipt, ensuring that unique ones are not re-added
-class Receipt(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    receipt_image_name = db.Column(db.String(255), unique=True, nullable=False)  # Name of the uploaded image
-    line_items = db.Column(db.JSON)  # Store line items as JSON
-    subtotal = db.Column(db.Float)
-    tax = db.Column(db.Float)
-    grandtotal = db.Column(db.Float)
-
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(150), unique=True, nullable=False)
-    email = db.Column(db.String(150), unique=True, nullable=False)
-    password = db.Column(db.String(150), nullable=False)
-    phone_number = db.Column(db.String(15), nullable=True)
-
-    def set_password(self, password):
-        self.password = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.password, password)
+db.init_app(app) #initialzie db from models.py with app
+CORS(app)
+#CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
 with app.app_context():
     db.create_all() # Creates tables if they don't exist
@@ -45,9 +24,6 @@ def getItemizedData():
         data = json.load(f)
     items = data['receipts'][0]['items']
     return items
-
-clientKey = os.getenv('clientKey')
-authorization= os.getenv('authorization')
 
 @app.route('/api/itemized-receipt', methods=['POST'])
 def itemize_receipt():
@@ -60,8 +36,13 @@ def itemize_receipt():
         existing_receipt = Receipt.query.filter_by(receipt_image_name=receipt_image_name).first()
         #existing_receipt=True
         if existing_receipt:
+            #get receipt id so u can query items table
+            receipt_id=existing_receipt.receipt_id
+            #get all items with certain receipt id
+            items=ReceiptItem.query.filter_by(receipt_id=receipt_id).all()
+            #TODO DONE : change this to query line items in the other table
             return jsonify({
-                "line_items": existing_receipt.line_items,
+                "line_items": items,
                 "subtotal": existing_receipt.subtotal,
                 "tax": existing_receipt.tax,
                 "grandtotal": existing_receipt.grandtotal
@@ -69,6 +50,7 @@ def itemize_receipt():
 
 
         try:
+            #TODO : add in line items into separate table as well
             print("SUCCESSFULLY CALLED")
 
             #for calling api (which I have a free trial for)
@@ -81,8 +63,8 @@ def itemize_receipt():
             }
             headers = {
                 'Accept': 'application/json',
-                'CLIENT-ID': clientKey,
-                'AUTHORIZATION': authorization
+                'CLIENT-ID': 'vrfXaU21wAPkSJ838vRCtayv4MAwjoBZnBrEEwG',
+                'AUTHORIZATION': 'apikey siyakamboj20:a0fe4ffe54af95a46a674150872e891e'
             }
             response = requests.request("POST", url, headers=headers, data=json.dumps(payload))
             print(response.status_code)
@@ -96,6 +78,7 @@ def itemize_receipt():
             grandtotal = receipt.get("total")
 
             # Store the result in the database
+            #TODO: upload user_id into here, remove line_items
             new_receipt = Receipt(
                 receipt_image_name=receipt_image_name,
                 line_items=line_items,
@@ -124,6 +107,7 @@ def itemize_receipt():
 
             # return jsonify(simplified_response)
 
+            #TODO : update the jsonify
             return jsonify({
                 "line_items": line_items,
                 "subtotal": subtotal,
@@ -140,17 +124,21 @@ def register():
     username = data.get('username')
     email = data.get('email')
     password = data.get('password')
-    phone_number = data.get('phone_number')
+    phone_number = data.get('phoneNumber')
+
+    print("called 2")
 
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "Username already exists."}), 400
 
     new_user = User(username=username, email=email)
+    #new_user.password("hello")
     new_user.set_password(password)
     new_user.phone_number = phone_number
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({"message": "User registered successfully."}), 201
+    #return jsonify({"message": "User registered successfully."}), 201
+    return 201
 
 @app.route('/api/login', methods=['POST'])
 def login():

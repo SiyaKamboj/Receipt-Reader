@@ -1,29 +1,28 @@
 import React, { useState } from 'react';
-import { useAuth } from './context/AuthContext';
 
-const Login = ({ setShowLogin }) => {
+const SignUp = ({ setShowLogin }) => {
     const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [phoneNumber, setPhoneNumber] = useState('');
     const [error, setError] = useState(null);
-    const { setAuthenticated, setUserId } = useAuth(); // Get setAuthenticated and setUserId from AuthContext
 
-    const handleLogin = async (event) => {
+    const handleSignUp = async (event) => {
         event.preventDefault();
         setError(null);
 
         try {
-            const response = await fetch('http://127.0.0.1:5000/api/login', {
+            const response = await fetch('http://127.0.0.1:5000/api/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ username, password }),
+                body: JSON.stringify({ username, email, password, phoneNumber }),
             });
 
             if (response.ok) {
-                const data = await response.json();
-                setAuthenticated(true);
-                setUserId(data.userId); // Set userId in AuthContext
+                alert("Registration successful! Please log in.");
+                setShowLogin(true); // Switch to login view after successful registration
             } else {
                 const data = await response.json();
                 setError(data.error || "An error occurred.");
@@ -36,13 +35,21 @@ const Login = ({ setShowLogin }) => {
 
     return (
         <div style={styles.container}>
-            <h2 style={styles.header}>Login</h2>
-            <form onSubmit={handleLogin} style={styles.form}>
+            <h2 style={styles.header}>Sign Up</h2>
+            <form onSubmit={handleSignUp} style={styles.form}>
                 <input
                     type="text"
                     placeholder="Username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
+                    required
+                    style={styles.input}
+                />
+                <input
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     required
                     style={styles.input}
                 />
@@ -54,19 +61,23 @@ const Login = ({ setShowLogin }) => {
                     required
                     style={styles.input}
                 />
-                <button type="submit" style={styles.button}>Login</button>
+                <input
+                    type="text"
+                    placeholder="Phone Number"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    style={styles.input}
+                />
+                <button type="submit" style={styles.button}>Sign Up</button>
                 {error && <p style={styles.error}>{error}</p>}
             </form>
-            <button onClick={() => setShowLogin(false)} style={styles.switchButton}>
-                Don't have an account? Sign Up
-            </button>
         </div>
     );
 };
 
 const styles = {
     container: {
-        backgroundColor: '#f5f3f0',
+        backgroundColor: '#f5f3f0', // Light neutral background
         borderRadius: '10px',
         padding: '40px',
         width: '400px',
@@ -76,7 +87,7 @@ const styles = {
         textAlign: 'center',
     },
     header: {
-        color: '#4a3f35',
+        color: '#4a3f35', // Dark brown header text
         marginBottom: '20px',
     },
     form: {
@@ -91,10 +102,10 @@ const styles = {
         borderRadius: '5px',
         border: '1px solid #ccc',
         fontSize: '16px',
-        backgroundColor: '#fff',
+        backgroundColor: '#fff', // White input background
     },
     button: {
-        backgroundColor: '#4a3f35',
+        backgroundColor: '#4a3f35', // Dark brown button
         color: '#fff',
         padding: '10px 20px',
         border: 'none',
@@ -104,14 +115,8 @@ const styles = {
         marginTop: '10px',
         transition: 'background-color 0.3s',
     },
-    switchButton: {
-        backgroundColor: 'transparent',
-        color: '#4a3f35',
-        border: 'none',
-        cursor: 'pointer',
-        marginTop: '20px',
-        fontSize: '14px',
-        textDecoration: 'underline',
+    buttonHover: {
+        backgroundColor: '#3a2f25',
     },
     error: {
         color: 'red',
@@ -119,4 +124,4 @@ const styles = {
     },
 };
 
-export default Login;
+export default SignUp;
