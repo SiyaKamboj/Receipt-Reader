@@ -7,6 +7,7 @@ import base64
 from flask_sqlalchemy import SQLAlchemy
 import os
 from models import Receipt, ReceiptItem, User, UserItemSelection, ReceiptParticipant, db
+from collections import defaultdict
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///receipts.db'  # Using SQLite for simplicity
@@ -386,6 +387,72 @@ def get_user_receipts_participants():
         return jsonify(receipts=result), 200
     except Exception as e:
         return jsonify({"message": "An error occurred while retrieving all participating receipts.", "error": str(e)}), 500
+
+@app.route('/api/SplitAmounts', methods=['POST'])
+def calculate_amount_owed():
+    try:
+        data = request.get_json()
+        receipt_id = data.get('receipt_id')
+        
+        # Retrieve receipt details
+        receipt = Receipt.query.get(receipt_id)
+        if not receipt:
+            return jsonify({"error": "Receipt not found"}), 404
+        subtotal = float(receipt.subtotal)
+        grand_total = float(receipt.grand_total)
+        
+        # Calculate additional costs
+        additional_costs = grand_total - subtotal
+        
+        # Retrieve item selections for the receipt
+        selections = UserItemSelection.query.filter_by(receipt_id=receipt_id).all()
+        
+        # Step 1: Track each item's participants and divide item costs among them
+        item_shares = defaultdict(list)  # Maps each item to the list of user_ids that selected it
+        user_subtotals = defaultdict(float)  # Tracks each user's subtotal contribution
+        
+        for selection in selections:
+            user_id = selection.user_id
+            item_id = selection.item_id
+            item_price = float(selection.item.price)
+            
+            # Add user to the list of participants for this item
+            item_shares[item_id].append(user_id)
+        
+        # Step 2: Divide item prices among participants and accumulate to each user's subtotal
+        for item_id, participants in item_shares.items():
+            item_price = float(ReceiptItem.query.get(item_id).price)
+            share_price = item_price / len(participants)  # Divide the item price among participants
+            
+            # Distribute share of item price to each user
+            for user_id in participants:
+                user_subtotals[user_id] += share_price
+
+        # Step 3: Calculate each user's share of additional costs based on their subtotal percentage
+        user_final_amounts = {}
+        for user_id, user_subtotal in user_subtotals.items():
+            # Calculate user's share of the additional costs
+            additional_cost_share = (user_subtotal / subtotal) * additional_costs if subtotal > 0 else 0
+            # Total amount owed by each user
+            total_owed = round(user_subtotal + additional_cost_share, 2)
+
+            # Retrieve user name
+            user = User.query.get(user_id)
+            user_name = user.username if user else "Unknown User"
+            user_final_amounts[user_name] = total_owed
+
+        # Check if calculated total matches the grand total
+        calculated_total = sum(user_final_amounts.values())
+        if calculated_total != grand_total:
+            discrepancy = round(grand_total - calculated_total, 2)
+            return jsonify({
+                "error": f"Calculated total {calculated_total} does not match grand total {grand_total}. Discrepancy: {discrepancy}"
+            }), 500
+        
+        return jsonify(final_amounts=user_final_amounts)
+    
+    except Exception as e:
+        return jsonify({"message": "An error occurred while calculating cost", "error": str(e)}), 500
 
 
 if __name__ == '__main__':

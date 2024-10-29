@@ -21,6 +21,9 @@ const ReceiptUpload = () => {
 
     const [myReceipts, setMyReceipts]=useState([]);
     const [myParticipatingReceipts, setMyParticipatingReceipts]=useState([]);
+
+    //how much each contributing person owes
+    const [userAmounts, setUserAmounts] = useState({});
     const { userId } = useAuth();
 
     useEffect(() => {
@@ -101,6 +104,28 @@ const ReceiptUpload = () => {
             fetchReceipts();
             seeAllParticipatingReceipts();
         } 
+        else if (view==="split-cost"){
+            const fetchAmounts = async () => {
+                try {
+                    const response = await fetch('http://127.0.0.1:5000/api/SplitAmounts', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ receipt_id: receiptId }),
+                    });
+                  if (response.ok) {
+                    const data = await response.json();
+                    setUserAmounts(data.final_amounts); // Store the data in state
+                  } else {
+                    console.error("Failed to fetch data");
+                  }
+                } catch (error) {
+                  console.error("Error:", error);
+                }
+            };
+            fetchAmounts()
+        }
     }, [view]);
 
     const fetchUserSelections = async (userId, receiptId) => {
@@ -444,7 +469,37 @@ const ReceiptUpload = () => {
                     
             ) : view === "split-cost" ? (
                 <div>
-                    <h2>Split Costs</h2>
+                    <h2 style={styles.header}>{vendorName} Receipt Summary</h2>
+                        {/* <h3>
+                            Completion Status: <span style={{ color: receiptCompleted ? 'green' : 'red' }}>
+                                {receiptCompleted ? 'Complete' : 'Incomplete'}
+                            </span>
+                        </h3> */}
+                        <div style={styles.summarySection}>
+                            <h3 style={styles.summaryText}>Subtotal: <span style={styles.price}>${subtotal}</span></h3>
+                            <h3 style={styles.summaryText}>Tax: <span style={styles.price}>${tax}</span></h3>
+                            <h3 style={styles.summaryText}>Grand Total: <span style={styles.price}>${grandtotal}</span></h3>
+                        </div>
+                    <h2>Amount Owed by Each User</h2>
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>User Name</th>
+                            <th>Amount Owed ($)</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {Object.entries(userAmounts).map(([userId, amount]) => (
+                            <tr key={userId}>
+                            <td>{userId}</td>
+                            <td>{amount.toFixed(2)}</td>
+                            </tr>
+                        ))}
+                        </tbody>
+                    </table>
+                    <button style={styles.button} onClick={() => setView("main")}>
+                        Back
+                    </button>
                 </div>
             ) : view === "collaborators" ? (
                 <div>
