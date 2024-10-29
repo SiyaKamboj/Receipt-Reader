@@ -6,7 +6,7 @@ import requests
 import base64
 from flask_sqlalchemy import SQLAlchemy
 import os
-from models import Receipt, ReceiptItem, User, UserItemSelection, db
+from models import Receipt, ReceiptItem, User, UserItemSelection, ReceiptParticipant, db
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///receipts.db'  # Using SQLite for simplicity
@@ -60,7 +60,6 @@ def itemize_receipt():
                 "date_of_purchase": existing_receipt.purchase_time,
                 "completed": existing_receipt.completed
             })
-
 
         try:
             print("SUCCESSFULLY CALLED")
@@ -318,6 +317,75 @@ def get_selected_items():
 
     return jsonify({"selected_items": item_list}), 200
 
+@app.route('/api/addParticipants', methods=['POST'])
+def add_users_to_receipt():
+    data = request.get_json()  # Get the JSON data sent in the request
+
+    receipt_id = data.get('receipt_id')  # Extract receipt_id from the data
+    user_ids = data.get('user_ids')  # Extract user_ids from the data
+
+    if not receipt_id or not user_ids:
+        return jsonify({"message": "Receipt ID and user IDs are required."}), 400
+
+    # Check for duplicate entries and add new participants
+    added_participants = []
+    for user_id in user_ids:
+        # Ensure that the combination of receipt_id and user_id is unique
+        if not ReceiptParticipant.query.filter_by(receipt_id=receipt_id, user_id=user_id).first():
+            new_participant = ReceiptParticipant(receipt_id=receipt_id, user_id=user_id)
+            db.session.add(new_participant)
+            added_participants.append(new_participant.user_id)
+
+    try:
+        db.session.commit()  # Commit the changes to the database
+        return jsonify({"message": "Participants added successfully.", "added_participants": added_participants}), 201
+    except Exception as e:
+        db.session.rollback()  # Rollback in case of error
+        return jsonify({"message": "An error occurred while adding participants.", "error": str(e)}), 500
+
+@app.route('/api/getAllUsers', methods=['GET'])
+def get_all_users():
+    try:
+        current_user_id = request.args.get('currentUserId', type=int)  # Get current user ID from query parameters
+        all_users = User.query.filter(User.user_id != current_user_id).all()  # Exclude the current user
+
+        # Convert the results to a list of dictionaries
+        result = [{"user_id": user.user_id, "username": user.username, "email": user.email, "phone_number": user.phone_number} for user in all_users]
+
+        return jsonify(users=result)
+    except Exception as e:
+        return jsonify({"message": "An error occurred while retrieving users.", "error": str(e)}), 500
+    
+@app.route('/api/getUserReceiptsParticipants', methods=['POST'])
+def get_user_receipts_participants():
+    try:
+        data=request.get_json()
+        user_id = data.get('userId')
+        if user_id is None:
+            return jsonify({"error": "userId is required"}), 400
+        # Query the ReceiptParticipant table to get all receipt IDs for the specified user_id
+        participant_receipts = ReceiptParticipant.query.filter_by(user_id=user_id).all()
+
+        # Extract the receipt IDs
+        receipt_ids = [participant.receipt_id for participant in participant_receipts]
+
+        # Optionally, retrieve more details about the receipts from the Receipts table
+        # for receipt_id in receipt_ids:
+        #     receipts += getOneReceipt(receipt_id)
+        receipts = Receipt.query.filter(Receipt.receipt_id.in_(receipt_ids)).with_entities(
+            Receipt.receipt_id,
+            Receipt.receipt_image_name,
+            Receipt.vendor_name,
+            Receipt.purchase_time,
+            Receipt.completed
+        ).all()
+
+        # Convert the results to a list of dictionaries with relevant receipt info
+        result = [{"receipt_id": receipt.receipt_id, "name": receipt.receipt_image_name, "vendor_name": receipt.vendor_name, "purchase_time": receipt.purchase_time, "completed": receipt.completed} for receipt in receipts]
+
+        return jsonify(receipts=result), 200
+    except Exception as e:
+        return jsonify({"message": "An error occurred while retrieving all participating receipts.", "error": str(e)}), 500
 
 
 if __name__ == '__main__':

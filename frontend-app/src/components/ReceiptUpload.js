@@ -16,10 +16,40 @@ const ReceiptUpload = () => {
     const [vendorAddress, setVendorAddress]=useState(null);
     const [purchaseTime, setPurchaseTime]=useState(new Date());
     const [receiptCompleted, setReceiptCompleted]= useState(false);
-    const[selectedParticipants, setSelectedParticipants]= useState([]);
+    const [selectedParticipants, setSelectedParticipants]= useState([]);
+    const [allUsers, setAllUsers] = useState([]);
 
     const [myReceipts, setMyReceipts]=useState([]);
+    const [myParticipatingReceipts, setMyParticipatingReceipts]=useState([]);
     const { userId } = useAuth();
+
+    useEffect(() => {
+        const fetchAllUsers = async () => {
+            try {
+                const response = await fetch(`http://127.0.0.1:5000/api/getAllUsers?currentUserId=${userId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                // Check if the response is okay
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const data = await response.json(); // Parse the JSON data
+                setAllUsers(data.users); // Set the users state with the fetched data
+                setLoading(false); // Set loading to false after data is fetched
+            } catch (error) {
+                console.error("Error fetching users:", error);
+                setError(error.message); // Set the error state
+                setLoading(false); // Set loading to false even if there is an error
+            }
+        };
+
+        fetchAllUsers(); // Call the function to fetch users
+    }, [userId]); // Dependency array includes currentUserId to re-fetch if it changes
 
     useEffect(() => {
         if (userId && receiptId) {
@@ -47,7 +77,29 @@ const ReceiptUpload = () => {
                     console.error("Error fetching receipts:", error);
                 }
             };
+
+            const seeAllParticipatingReceipts = async () => {
+                try {
+                    const response = await fetch('http://127.0.0.1:5000/api/getUserReceiptsParticipants', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ userId: userId }),
+                    });
+    
+                    const data = await response.json(); // Parse the JSON data
+                    setMyParticipatingReceipts(data.receipts); // Set the users state with the fetched data
+                    setLoading(false); // Set loading to false after data is fetched
+                } catch (error) {
+                    console.error("Error fetching participating receipts:", error);
+                    setError(error.message); // Set the error state
+                    setLoading(false); // Set loading to false even if there is an error
+                }
+            };
+
             fetchReceipts();
+            seeAllParticipatingReceipts();
         } 
     }, [view]);
 
@@ -217,6 +269,39 @@ const ReceiptUpload = () => {
         }
     };
 
+    //handle toggling between selecting users and un-selecting them
+    const handleUserSelection = (participantUserId) => {
+        setSelectedParticipants((selectedParticipants) => {
+            if (selectedParticipants.includes(participantUserId)) {
+                return selectedParticipants.filter(id => id !== participantUserId);
+            } else {
+                return [...selectedParticipants, participantUserId];
+            }
+        });
+    };
+
+    const addParticipants = async () => {
+        try {
+            const response = await fetch('http://127.0.0.1:5000/api/addParticipants', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ receipt_id: receiptId, user_ids: selectedParticipants }) // Replace 1 with the actual receipt ID
+            });
+            if (response.ok) {
+                console.log("Participants added successfully!");
+                // Optionally refresh the participant list
+                //fetchParticipants(1);
+            } else {
+                console.error("Error adding participants");
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
+
+
     return (
         <div style={styles.container}>
             {view === "main" ? (
@@ -269,19 +354,6 @@ const ReceiptUpload = () => {
                             </div>
                             <h3 style={styles.itemsHeader}>Select Your Items</h3>
                             <div style={styles.itemList}>
-                                {/* {lineItems.map((item, index) => (
-                                    <div key={index} style={styles.row}>
-                                        <input
-                                            id={item.id}
-                                            type="checkbox"
-                                            style={styles.checkbox}
-                                            checked={selectedItems.includes(item.id)}
-                                            onChange={() => handleSelectItem(item.id)}
-                                        />
-                                        <span style={styles.itemName}>{item.description}</span>
-                                        <span style={styles.itemPrice}>${item.price}</span>
-                                    </div>
-                                ))} */}
                                 {lineItems.map((item) => (
                                     <div key={item.id} style={styles.row}>
                                         <input
@@ -310,7 +382,7 @@ const ReceiptUpload = () => {
                 </div>
             ) : view === "existing" ? (
                 <div>
-                    <h2>Existing Receipts</h2>
+                    <h2>My Receipts</h2>
                     {myReceipts.length > 0 ? (
                         <ul>
                             {myReceipts.map((receipt) => (
@@ -321,7 +393,35 @@ const ReceiptUpload = () => {
                                         <p>
                                             Completion Status: 
                                             <span style={{ color: receipt.completed ? 'green' : 'red' }}>
-                                                {receipt.completed ? 'Complete' : 'Incomplete'}
+                                                {receipt.completed ? ' Complete' : ' Incomplete'}
+                                            </span>
+                                        </p>
+                                        <button 
+                                            style={styles.viewButton} 
+                                            onClick={() => handleViewReceipt(receipt.receipt_id)}
+                                        >
+                                            View Receipt
+                                        </button>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p>No receipts found.</p>
+                    )}
+
+                    <h2>Collaborating Receipts</h2>
+                    {myParticipatingReceipts.length > 0 ? (
+                        <ul>
+                            {myParticipatingReceipts.map((receipt) => (
+                                <li key={receipt.receipt_id} style={styles.receiptItem}>
+                                    <div>
+                                        <h3>{receipt.vendor_name}</h3>
+                                        <p>Purchase Time: {new Date(receipt.purchase_time).toLocaleString()}</p>
+                                        <p>
+                                            Completion Status: 
+                                            <span style={{ color: receipt.completed ? 'green' : 'red' }}>
+                                                {receipt.completed ? ' Complete' : ' Incomplete'}
                                             </span>
                                         </p>
                                         <button 
@@ -341,6 +441,7 @@ const ReceiptUpload = () => {
                         Back
                     </button>
                 </div>
+                    
             ) : view === "split-cost" ? (
                 <div>
                     <h2>Split Costs</h2>
@@ -348,12 +449,12 @@ const ReceiptUpload = () => {
             ) : view === "collaborators" ? (
                 <div>
                     <h2>Collaborators</h2>
-                    <h3>Current Participants</h3>
+                    {/* <h3>Current Participants</h3>
                     <ul>
                         {currentParticipants.map(participant => (
                             <li key={participant.user_id}>{participant.user_id}</li> // Display usernames instead of IDs if possible
                         ))}
-                    </ul>
+                    </ul> */}
                     
                     <h3>Add Participants</h3>
                     <div>
@@ -361,7 +462,7 @@ const ReceiptUpload = () => {
                             <div key={user.user_id}>
                                 <input
                                     type="checkbox"
-                                    checked={selectedUserIds.includes(user.user_id)}
+                                    checked={selectedParticipants.includes(user.user_id)}
                                     onChange={() => handleUserSelection(user.user_id)}
                                 />
                                 <span>{user.username}</span>
