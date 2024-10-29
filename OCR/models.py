@@ -29,9 +29,14 @@ class Receipt(db.Model):
     receipt_image_name = db.Column(db.String(255), unique=True, nullable=False)  # Name of the uploaded image
     #image_path = db.Column(db.Text, nullable=False)
     date = db.Column(db.DateTime, default=db.func.current_timestamp())
+    vendor_name=db.Column(db.String(255), nullable=False)
+    vendor_address=db.Column(db.String(255), nullable=True)
+    purchase_time=db.Column(db.DateTime, nullable=True)
     subtotal = db.Column(db.Numeric(10, 2))
     tax = db.Column(db.Numeric(10, 2))
     grand_total = db.Column(db.Numeric(10, 2))
+    #if all items in list have been claimed
+    completed=db.Column(db.Boolean, default=False, nullable=False)
 
     # Relationships
     items = db.relationship('ReceiptItem', backref='receipt', lazy=True, cascade="all, delete")
@@ -65,6 +70,7 @@ class UserItemSelection(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=False)
     item_id = db.Column(db.Integer, db.ForeignKey('receipt_items.item_id'), nullable=False)
+    receipt_id=db.Column(db.Integer, db.ForeignKey('receipts.receipt_id'), nullable=False)
 
     # Ensure unique selection of each item by each user
     __table_args__ = (db.UniqueConstraint('user_id', 'item_id', name='_user_item_uc'),)

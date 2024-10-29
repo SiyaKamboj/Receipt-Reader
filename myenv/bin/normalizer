@@ -1,4 +1,6 @@
-#!/Users/siyakamboj/Downloads/Receipt-Reader/myenv/bin/python3.12
+#!/bin/sh
+'''exec' "/Users/siyakamboj/Downloads/Personal Projects/Receipt-Reader/myenv/bin/python3" "$0" "$@"
+' '''
 # -*- coding: utf-8 -*-
 import re
 import sys

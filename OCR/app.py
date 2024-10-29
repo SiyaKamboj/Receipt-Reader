@@ -6,7 +6,7 @@ import requests
 import base64
 from flask_sqlalchemy import SQLAlchemy
 import os
-from models import Receipt, ReceiptItem, User, db
+from models import Receipt, ReceiptItem, User, UserItemSelection, db
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///receipts.db'  # Using SQLite for simplicity
@@ -27,30 +27,42 @@ def getItemizedData():
 
 @app.route('/api/itemized-receipt', methods=['POST'])
 def itemize_receipt():
+    from dateutil import parser
+    user_id = request.form.get('userId')
+    print("User_id is "+ user_id)
     # Assuming receipt_image is sent in the POST request
     if 'receipt_image' in request.files:
         receipt_image = request.files['receipt_image']
         receipt_image_name = receipt_image.filename
 
-        # Check if receipt already exists in the database
+        # Check if receipt already exists in the database BY CHECKING IF TIMESTAMP OF PURCHASE AND STORE NAME ARE THE SAME
         existing_receipt = Receipt.query.filter_by(receipt_image_name=receipt_image_name).first()
         #existing_receipt=True
+        
         if existing_receipt:
+            print("existing receipt!!!")
             #get receipt id so u can query items table
             receipt_id=existing_receipt.receipt_id
             #get all items with certain receipt id
-            items=ReceiptItem.query.filter_by(receipt_id=receipt_id).all()
+            items = db.session.query(ReceiptItem.description, ReceiptItem.price, ReceiptItem.item_id).filter_by(receipt_id=receipt_id).all()
+            # Converting to a list of dictionaries for easier handling on the frontend
+            item_list = [{"description": item.description, "price": item.price, "id": item.item_id} for item in items]
+
             #TODO DONE : change this to query line items in the other table
             return jsonify({
-                "line_items": items,
                 "subtotal": existing_receipt.subtotal,
+                "line_items": item_list,
                 "tax": existing_receipt.tax,
-                "grandtotal": existing_receipt.grandtotal
+                "grandtotal": existing_receipt.grand_total,
+                "receipt_id": receipt_id,
+                "vendor_name": existing_receipt.vendor_name,
+                "vendor_address": existing_receipt.vendor_address,
+                "date_of_purchase": existing_receipt.purchase_time,
+                "completed": existing_receipt.completed
             })
 
 
         try:
-            #TODO : add in line items into separate table as well
             print("SUCCESSFULLY CALLED")
 
             #for calling api (which I have a free trial for)
@@ -76,18 +88,44 @@ def itemize_receipt():
             subtotal = receipt.get("subtotal")
             tax = receipt.get("tax")
             grandtotal = receipt.get("total")
+            vendor_name = receipt["vendor"].get("name")
+            vendor_address = receipt["vendor"].get("address")
+            if receipt.get("date") is not None:
+                dateOfPurchase = parser.parse(receipt.get("date"))
+            else:
+                dateOfPurchase=None
+
+
+
 
             # Store the result in the database
             #TODO: upload user_id into here, remove line_items
+            print("user_id is "+ user_id)
             new_receipt = Receipt(
+                uploaded_by= user_id, 
                 receipt_image_name=receipt_image_name,
-                line_items=line_items,
+                vendor_name=vendor_name,
+                vendor_address=vendor_address,
+                purchase_time=dateOfPurchase,
                 subtotal=subtotal,
                 tax=tax,
-                grandtotal=grandtotal
+                grand_total=grandtotal, 
+                completed=False
             )
             db.session.add(new_receipt)
             db.session.commit()
+            receipt_id = new_receipt.receipt_id
+            
+            #save each item from lineitems into ReceiptItem table
+            for item in line_items:
+                new_item= ReceiptItem(
+                    receipt_id= receipt_id,
+                    description= item.get("description"),
+                    price=item.get("total")
+                )
+                db.session.add(new_item)
+            db.session.commit()
+
 
             #for debugging purposes
             for item in line_items:
@@ -97,22 +135,26 @@ def itemize_receipt():
             print(f"Subtotal: ${subtotal:.2f}")
             print(f"Tax: ${tax:.2f}")
             print(f"Grand Total: ${grandtotal:.2f}")
+            print(f"Vendor Name: {vendor_name}")
+            print(f"Vendor address: {vendor_address}")
+            print(f"Date of purchase: {dateOfPurchase}")
 
-            # simplified_response = {
-            #     "line_items": line_items,
-            #     "subtotal": subtotal,
-            #     "tax": tax,
-            #     "grandtotal": grandtotal
-            # }
-
-            # return jsonify(simplified_response)
+            #get all items and their ID's and return it to the front-end
+            items = db.session.query(ReceiptItem.description, ReceiptItem.price, ReceiptItem.item_id).filter_by(receipt_id=receipt_id).all()
+            # Converting to a list of dictionaries for easier handling on the frontend
+            item_list = [{"description": item.description, "price": item.price, "id": item.item_id} for item in items]
 
             #TODO : update the jsonify
             return jsonify({
-                "line_items": line_items,
+                "line_items": item_list,
                 "subtotal": subtotal,
                 "tax": tax,
-                "grandtotal": grandtotal
+                "grandtotal": grandtotal,
+                "receipt_id": receipt_id,
+                "vendor_name": vendor_name,
+                "vendor_address": vendor_address,
+                "date_of_purchase": dateOfPurchase, 
+                "completed": False
             })
         except Exception as e:
             print(f"Error processing file: {str(e)}")  # Log the error for debugging
@@ -137,8 +179,8 @@ def register():
     new_user.phone_number = phone_number
     db.session.add(new_user)
     db.session.commit()
-    #return jsonify({"message": "User registered successfully."}), 201
-    return 201
+    return jsonify({"message": "User registered successfully."}), 201
+    #return 201
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -148,8 +190,134 @@ def login():
 
     user = User.query.filter_by(username=username).first()
     if user and user.check_password(password):
-        return jsonify({"message": "Login successful."}), 200
+        return jsonify({
+        "message": "Login successful.",
+        "userId": user.user_id 
+    }), 200
     return jsonify({"error": "Invalid username or password."}), 401
+
+@app.route('/api/userChosen', methods=['POST'])
+def userChoosesItems():
+    data=request.get_json()
+    selected_items = data.get('selectedItems', [])
+    user_id = data.get('userId')
+    receipt_id=data.get('receiptId')
+    # Debugging print statements
+    print("Selected item IDs received:", selected_items)
+    print("User ID received:", user_id)
+    print("Receipt ID received", receipt_id)
+    # first delete everything associated with that user id and receipt id in the table
+    db.session.query(UserItemSelection).filter_by(user_id=user_id, receipt_id=receipt_id).delete()
+    db.session.commit()
+
+    #insert user id and item id into table
+    for item in selected_items:
+        new_user_Item_Connection= UserItemSelection(
+            user_id=user_id,
+            item_id=item, 
+            receipt_id=receipt_id
+        )
+        db.session.add(new_user_Item_Connection)
+    db.session.commit()
+
+    ready_to_move_on= check_all_items_selected(receipt_id)
+
+    return jsonify({
+        "message": "Successfully connected user with item",
+        "ready_to_move_on": ready_to_move_on
+    }), 200
+
+#make sure all items, given a receipt id, are accounted for in the selected_item_id. this will determine whether you can move on and split costs or not
+def check_all_items_selected(receipt_id):
+    # Step 1: Get all item_ids for the specified receipt_id from the ReceiptItem table
+    receipt_item_ids = {item.item_id for item in db.session.query(ReceiptItem.item_id).filter_by(receipt_id=receipt_id).all()}
+    
+    # Step 2: Get all item_ids for the specified receipt_id from the UserItemSelection table
+    selected_item_ids = {selection.item_id for selection in db.session.query(UserItemSelection.item_id).filter_by(receipt_id=receipt_id).all()}
+    
+    # Step 3: Check if every item_id in ReceiptItem is in UserItemSelection
+    if receipt_item_ids.issubset(selected_item_ids):
+        #change completed in this receipt_id to true
+        receipt = Receipt.query.get(receipt_id)
+        receipt.completed = True
+        db.session.commit()
+        return True
+    else:
+        #change completed in this receipt_id to false
+        receipt = Receipt.query.get(receipt_id)
+        receipt.completed = False
+        db.session.commit()
+        return False
+
+@app.route('/api/MyReceipts', methods=['POST'])
+def getAllMyReceipts():
+    data=request.get_json()
+    user_id = data.get('userId')
+    if user_id is None:
+        return jsonify({"error": "userId is required"}), 400
+    # Query the database for receipts uploaded by the specified user
+    receipts = Receipt.query.filter_by(uploaded_by=user_id).with_entities(Receipt.receipt_id, Receipt.receipt_image_name, Receipt.vendor_name, Receipt.purchase_time, Receipt.completed).all()
+    # Format the results as a list of dictionaries
+    result = [{"receipt_id": receipt.receipt_id, "name": receipt.receipt_image_name, "vendor_name": receipt.vendor_name, "purchase_time": receipt.purchase_time, "completed": receipt.completed} for receipt in receipts]
+    return jsonify(result), 200
+
+@app.route('/api/getOneReceipt', methods=['POST'])
+def getOneReceipt():
+    data=request.get_json()
+    receipt_id=data.get('receipt_id')
+    print('receipt_id is ', receipt_id)
+    if receipt_id is None:
+        return jsonify({"error":"receiptId is required"}), 400
+    
+    # Retrieve the receipt object
+    receipt = Receipt.query.filter_by(receipt_id=receipt_id).first()
+
+    # Check if the receipt was found
+    if receipt is None:
+        return jsonify({"error": "Receipt not found"}), 404
+
+    # Get all items associated with the receipt
+    items = db.session.query(ReceiptItem.description, ReceiptItem.price, ReceiptItem.item_id).filter_by(receipt_id=receipt_id).all()
+
+    # Convert items to a list of dictionaries for easier handling on the frontend
+    item_list = [{"description": item.description, "price": item.price, "id": item.item_id} for item in items]
+
+    # Prepare the result with all necessary receipt information
+    result = {
+        "line_items": item_list,
+        "receipt_id": receipt.receipt_id,
+        "name": receipt.receipt_image_name,
+        "vendor_name": receipt.vendor_name,
+        "vendor_address": receipt.vendor_address,
+        "purchase_time": receipt.purchase_time,
+        "subtotal": receipt.subtotal,
+        "tax": receipt.tax,
+        "grand_total": receipt.grand_total,
+        "completed": receipt.completed
+    }
+
+    # Return the result
+    return jsonify(result), 200
+
+@app.route('/api/getSelectedItems', methods=['POST'])
+def get_selected_items():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    receipt_id = data.get('receipt_id')
+
+    if user_id is None or receipt_id is None:
+        return jsonify({"error": "user_id and receipt_id are required"}), 400
+    # Step 1: Query the UserItemSelection table for the specified user_id and receipt_id
+    selections = UserItemSelection.query.filter_by(user_id=user_id, receipt_id=receipt_id).all()
+    # Step 2: Extract item_ids from the selections
+    selected_item_ids = [selection.item_id for selection in selections]
+    # Step 3: Query the ReceiptItem table for the selected item_ids
+    items = ReceiptItem.query.filter(ReceiptItem.item_id.in_(selected_item_ids)).all()
+    # Step 4: Convert the results to a list of dictionaries
+    item_list = [{"description": item.description, "price": item.price, "id": item.item_id} for item in items]
+
+    return jsonify({"selected_items": item_list}), 200
+
 
 
 if __name__ == '__main__':
